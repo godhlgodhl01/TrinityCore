@@ -1,0 +1,59 @@
+name: Windows Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: # GitHub 웹페이지에서 수동으로 빌드 버튼을 눌러 실행 가능
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies (Boost, OpenSSL, MySQL)
+        run: |
+          choco install boost-msvc-14.3 openssl mysql -y
+        shell: pwsh
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 `
+            -DTOOLS=1 `
+            -DSERVERS=1 `
+            -DSCRIPTS=static `
+            -DUSE_COREPCH=1 `
+            -DUSE_SCRIPTPCH=1 `
+            -DWITH_WARNINGS=0 `
+            -DBUILD_TESTING=0 `
+            -DCMAKE_INSTALL_PREFIX="$PWD/install"
+        shell: pwsh
+
+      - name: Build & Install (Release)
+        run: |
+          cd build
+          cmake --build . --config Release -j 4
+          cmake --install . --config Release
+        shell: pwsh
+
+      - name: Copy Required DLLs
+        run: |
+          $installDir = "build/install/bin"
+          # OpenSSL 및 MySQL DLL 자동 복사 (실행 시 DLL 누락 오류 방지)
+          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libcrypto-*.dll" -Destination $installDir -ErrorAction SilentlyContinue
+          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libssl-*.dll" -Destination $installDir -ErrorAction SilentlyContinue
+          Copy-Item "C:\Program Files\MySQL\MySQL Server *\lib\libmysql.dll" -Destination $installDir -ErrorAction SilentlyContinue
+        shell: pwsh
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cataclysm-Win64-Binaries
+          path: build/install/bin/
+          retention-days: 7
