@@ -1,4 +1,4 @@
-name: TrinityCore Windows Build
+name: Cataclysm 4.3.4 Windows Build
 
 on:
   push:
@@ -15,44 +15,34 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Dependencies
+      - name: Install Dependencies (Boost, MySQL, OpenSSL via vcpkg)
         run: |
-          choco install boost-msvc-14.3 mysql openssl --no-progress -y
-        shell: pwsh
-
-      - name: Verify & Print Paths
-        id: paths
-        run: |
-          $boostDir = (Get-ChildItem "C:\local" -Filter "boost_*" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-          $mysqlDir = (Get-ChildItem "C:\Program Files\MySQL" -Filter "MySQL Server *" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-          $opensslDir = "C:\Program Files\OpenSSL-Win64"
-          
-          Write-Host "Boost: $boostDir"
-          Write-Host "MySQL: $mysqlDir"
-          Write-Host "OpenSSL: $opensslDir"
-
-          "BOOST_ROOT=$boostDir" >> $env:GITHUB_OUTPUT
-          "MYSQL_DIR=$mysqlDir" >> $env:GITHUB_OUTPUT
-          "OPENSSL_DIR=$opensslDir" >> $env:GITHUB_OUTPUT
+          choco install boost-msvc-14.3 mysql --no-progress -y
+          # 내장된 vcpkg로 헤더와 .lib, .dll이 완벽히 포함된 OpenSSL x64 설치
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install openssl:x64-windows
         shell: pwsh
 
       - name: Configure CMake
         run: |
+          $boostDir = (Get-ChildItem "C:\local" -Filter "boost_*" | Select-Object -First 1).FullName
+          $mysqlDir = (Get-ChildItem "C:\Program Files\MySQL" -Filter "MySQL Server *" | Select-Object -First 1).FullName
+          $opensslDir = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+
           mkdir build
           cd build
           cmake .. -A x64 `
-            -DBOOST_ROOT="${{ steps.paths.outputs.BOOST_ROOT }}" `
-            -DMYSQL_INCLUDE_DIR="${{ steps.paths.outputs.MYSQL_DIR }}\include" `
-            -DMYSQL_LIBRARY="${{ steps.paths.outputs.MYSQL_DIR }}\lib\libmysql.lib" `
-            -DOPENSSL_ROOT_DIR="${{ steps.paths.outputs.OPENSSL_DIR }}" `
+            -DBOOST_ROOT="$boostDir" `
+            -DBoost_COMPILER="-vc143" `
+            -DMYSQL_INCLUDE_DIR="$mysqlDir\include" `
+            -DMYSQL_LIBRARY="$mysqlDir\lib\libmysql.lib" `
+            -DOPENSSL_ROOT_DIR="$opensslDir" `
             -DTOOLS=1 `
             -DSERVERS=1 `
             -DSCRIPTS=static `
             -DUSE_COREPCH=1 `
             -DUSE_SCRIPTPCH=1 `
             -DWITH_WARNINGS=0 `
-            -DBUILD_TESTING=0 `
-            -DCMAKE_CXX_FLAGS="/W0 /EHsc"
+            -DBUILD_TESTING=0
         shell: pwsh
 
       - name: Build (Release)
@@ -63,16 +53,18 @@ jobs:
 
       - name: Package Binaries & DLLs
         run: |
+          $mysqlDir = (Get-ChildItem "C:\Program Files\MySQL" -Filter "MySQL Server *" | Select-Object -First 1).FullName
+          $opensslBin = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
+
           New-Item -ItemType Directory -Force -Path "release_output"
           Copy-Item "build/bin/Release/*" -Destination "release_output" -Recurse -Force
-          
-          Copy-Item "${{ steps.paths.outputs.OPENSSL_DIR }}\bin\*.dll" -Destination "release_output" -ErrorAction SilentlyContinue
-          Copy-Item "${{ steps.paths.outputs.MYSQL_DIR }}\lib\libmysql.dll" -Destination "release_output" -ErrorAction SilentlyContinue
+          Copy-Item "$opensslBin\*.dll" -Destination "release_output" -Force
+          Copy-Item "$mysqlDir\lib\libmysql.dll" -Destination "release_output" -Force
         shell: pwsh
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TrinityCore-Win64
+          name: Cataclysm-4.3.4-Win64
           path: release_output/
           retention-days: 7
