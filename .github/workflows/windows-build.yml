@@ -1,9 +1,9 @@
-name: Windows Build
+name: TrinityCore Windows Build
 
 on:
   push:
   pull_request:
-  workflow_dispatch: # GitHub 웹페이지에서 수동으로 빌드 버튼을 눌러 실행 가능
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,45 +15,50 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Dependencies (Boost, OpenSSL, MySQL)
+      - name: Install Dependencies
         run: |
-          choco install boost-msvc-14.3 openssl mysql -y
+          choco install boost-msvc-14.3 mysql -y
+          # OpenSSL 1.1.1 또는 3.x 환경 호환성을 위해 설치
+          choco install openssl -y
         shell: pwsh
 
       - name: Configure CMake
         run: |
+          $boostDir = (Get-ChildItem "C:\local" -Filter "boost_*" | Select-Object -First 1).FullName
           mkdir build
           cd build
           cmake .. -G "Visual Studio 17 2022" -A x64 `
+            -DBOOST_ROOT="$boostDir" `
             -DTOOLS=1 `
             -DSERVERS=1 `
             -DSCRIPTS=static `
             -DUSE_COREPCH=1 `
             -DUSE_SCRIPTPCH=1 `
             -DWITH_WARNINGS=0 `
-            -DBUILD_TESTING=0 `
-            -DCMAKE_INSTALL_PREFIX="$PWD/install"
+            -DBUILD_TESTING=0
         shell: pwsh
 
-      - name: Build & Install (Release)
+      - name: Build (Release)
         run: |
           cd build
           cmake --build . --config Release -j 4
-          cmake --install . --config Release
         shell: pwsh
 
-      - name: Copy Required DLLs
+      - name: Package Binaries & DLLs
         run: |
-          $installDir = "build/install/bin"
-          # OpenSSL 및 MySQL DLL 자동 복사 (실행 시 DLL 누락 오류 방지)
-          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libcrypto-*.dll" -Destination $installDir -ErrorAction SilentlyContinue
-          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libssl-*.dll" -Destination $installDir -ErrorAction SilentlyContinue
-          Copy-Item "C:\Program Files\MySQL\MySQL Server *\lib\libmysql.dll" -Destination $installDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "release_output"
+          # TrinityCore 기본 출력 폴더(build/bin/Release)에서 모든 exe 및 설정 파일 복사
+          Copy-Item "build/bin/Release/*" -Destination "release_output" -Recurse -Force
+          
+          # 필수 DLL 복사 (OpenSSL, MySQL)
+          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libcrypto-*.dll" -Destination "release_output" -ErrorAction SilentlyContinue
+          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libssl-*.dll" -Destination "release_output" -ErrorAction SilentlyContinue
+          Copy-Item "C:\Program Files\MySQL\MySQL Server *\lib\libmysql.dll" -Destination "release_output" -ErrorAction SilentlyContinue
         shell: pwsh
 
-      - name: Upload Build Artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Cataclysm-Win64-Binaries
-          path: build/install/bin/
+          name: TrinityCore-Win64
+          path: release_output/
           retention-days: 7
