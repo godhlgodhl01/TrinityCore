@@ -17,43 +17,57 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          choco install boost-msvc-14.3 mysql -y
-          # OpenSSL 1.1.1 또는 3.x 환경 호환성을 위해 설치
-          choco install openssl -y
+          choco install boost-msvc-14.3 mysql openssl --no-progress -y
+        shell: pwsh
+
+      - name: Verify & Print Paths
+        id: paths
+        run: |
+          $boostDir = (Get-ChildItem "C:\local" -Filter "boost_*" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          $mysqlDir = (Get-ChildItem "C:\Program Files\MySQL" -Filter "MySQL Server *" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          $opensslDir = "C:\Program Files\OpenSSL-Win64"
+          
+          Write-Host "Boost: $boostDir"
+          Write-Host "MySQL: $mysqlDir"
+          Write-Host "OpenSSL: $opensslDir"
+
+          "BOOST_ROOT=$boostDir" >> $env:GITHUB_OUTPUT
+          "MYSQL_DIR=$mysqlDir" >> $env:GITHUB_OUTPUT
+          "OPENSSL_DIR=$opensslDir" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Configure CMake
         run: |
-          $boostDir = (Get-ChildItem "C:\local" -Filter "boost_*" | Select-Object -First 1).FullName
           mkdir build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 `
-            -DBOOST_ROOT="$boostDir" `
+          cmake .. -A x64 `
+            -DBOOST_ROOT="${{ steps.paths.outputs.BOOST_ROOT }}" `
+            -DMYSQL_INCLUDE_DIR="${{ steps.paths.outputs.MYSQL_DIR }}\include" `
+            -DMYSQL_LIBRARY="${{ steps.paths.outputs.MYSQL_DIR }}\lib\libmysql.lib" `
+            -DOPENSSL_ROOT_DIR="${{ steps.paths.outputs.OPENSSL_DIR }}" `
             -DTOOLS=1 `
             -DSERVERS=1 `
             -DSCRIPTS=static `
             -DUSE_COREPCH=1 `
             -DUSE_SCRIPTPCH=1 `
             -DWITH_WARNINGS=0 `
-            -DBUILD_TESTING=0
+            -DBUILD_TESTING=0 `
+            -DCMAKE_CXX_FLAGS="/W0 /EHsc"
         shell: pwsh
 
       - name: Build (Release)
         run: |
           cd build
-          cmake --build . --config Release -j 4
+          cmake --build . --config Release -- /m /p:CL_MPcount=4
         shell: pwsh
 
       - name: Package Binaries & DLLs
         run: |
           New-Item -ItemType Directory -Force -Path "release_output"
-          # TrinityCore 기본 출력 폴더(build/bin/Release)에서 모든 exe 및 설정 파일 복사
           Copy-Item "build/bin/Release/*" -Destination "release_output" -Recurse -Force
           
-          # 필수 DLL 복사 (OpenSSL, MySQL)
-          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libcrypto-*.dll" -Destination "release_output" -ErrorAction SilentlyContinue
-          Copy-Item "C:\Program Files\OpenSSL-Win64\bin\libssl-*.dll" -Destination "release_output" -ErrorAction SilentlyContinue
-          Copy-Item "C:\Program Files\MySQL\MySQL Server *\lib\libmysql.dll" -Destination "release_output" -ErrorAction SilentlyContinue
+          Copy-Item "${{ steps.paths.outputs.OPENSSL_DIR }}\bin\*.dll" -Destination "release_output" -ErrorAction SilentlyContinue
+          Copy-Item "${{ steps.paths.outputs.MYSQL_DIR }}\lib\libmysql.dll" -Destination "release_output" -ErrorAction SilentlyContinue
         shell: pwsh
 
       - name: Upload Artifacts
